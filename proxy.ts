@@ -1,4 +1,5 @@
 import { createServerClient } from '@supabase/ssr'
+import { createClient } from '@supabase/supabase-js'
 import { NextResponse, type NextRequest } from 'next/server'
 
 export async function proxy(request: NextRequest) {
@@ -24,11 +25,8 @@ export async function proxy(request: NextRequest) {
   )
 
   const { data: { user } } = await supabase.auth.getUser()
-
-  // Rutas protegidas por rol
   const path = request.nextUrl.pathname
 
-  // Si no hay sesión y trata de acceder a rutas protegidas
   if (!user) {
     if (
       path.startsWith('/owner') ||
@@ -40,21 +38,25 @@ export async function proxy(request: NextRequest) {
     return supabaseResponse
   }
 
-  // Obtener rol del usuario
-  const { data: profile } = await supabase
+  // Usar service role para leer el perfil sin restricciones de RLS
+  const adminClient = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  )
+
+  const { data: profile } = await adminClient
     .from('profiles')
     .select('role')
     .eq('id', user.id)
     .single()
 
   const role = profile?.role
+  console.log('PROXY - user:', user?.id, '| role:', role, '| path:', path, '| profile data:', JSON.stringify(profile))
 
-  // Proteger rutas del owner
   if (path.startsWith('/owner') && role !== 'owner') {
     return NextResponse.redirect(new URL('/', request.url))
   }
 
-  // Proteger rutas del vendedor
   if (path.startsWith('/vendor') && !['owner', 'vendor'].includes(role || '')) {
     return NextResponse.redirect(new URL('/', request.url))
   }

@@ -1,14 +1,19 @@
 import { createClient } from '@/lib/supabase/server'
+import { createClient as createAdminClient } from '@supabase/supabase-js'
 import { redirect } from 'next/navigation'
 
 export default async function OwnerDashboard() {
   const supabase = await createClient()
 
   const { data: { user } } = await supabase.auth.getUser()
-
   if (!user) redirect('/login')
 
-  const { data: profile } = await supabase
+  const adminClient = createAdminClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  )
+
+  const { data: profile } = await adminClient
     .from('profiles')
     .select('role, full_name')
     .eq('id', user.id)
@@ -23,11 +28,7 @@ export default async function OwnerDashboard() {
       color: '#F0EDE6',
       padding: '24px',
     }}>
-      <div style={{
-        maxWidth: '1200px',
-        margin: '0 auto',
-      }}>
-        {/* Header */}
+      <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
         <div style={{
           display: 'flex',
           justifyContent: 'space-between',
@@ -56,7 +57,6 @@ export default async function OwnerDashboard() {
           </span>
         </div>
 
-        {/* Stats */}
         <div style={{
           display: 'grid',
           gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
@@ -65,7 +65,7 @@ export default async function OwnerDashboard() {
         }}>
           {[
             { label: 'Piezas activas', value: '0', sub: 'en catálogo' },
-            { label: 'Ventas este mes', value: 'Q 0', sub: 'abril 2025' },
+            { label: 'Ventas este mes', value: 'Q 0', sub: 'este mes' },
             { label: 'Margen promedio', value: '—', sub: 'sobre costo' },
             { label: 'Alertas activas', value: '0', sub: 'sin alertas' },
           ].map((stat, i) => (
@@ -81,7 +81,6 @@ export default async function OwnerDashboard() {
           ))}
         </div>
 
-        {/* Quick actions */}
         <div style={{
           display: 'grid',
           gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',

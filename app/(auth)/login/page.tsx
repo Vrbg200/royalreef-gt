@@ -23,27 +23,22 @@ export default function LoginPage() {
       password,
     })
 
-    if (error) {
-      setError('Correo o contraseña incorrectos')
-      setLoading(false)
-      return
-    }
+  if (error) {
+    setError('Correo o contraseña incorrectos')
+    setLoading(false)
+  return
+}
 
-    // Obtener rol del usuario
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('role')
-      .eq('id', data.user.id)
-      .single()
-
+// Dejar que el servidor decida a dónde redirigir según el rol
+  window.location.href = '/auth/redirect'
     // Redirigir según rol
-    if (profile?.role === 'owner') {
-      router.push('/owner')
-    } else if (profile?.role === 'vendor') {
-      router.push('/vendor')
-    } else {
-      router.push('/')
-    }
+    const destination = profile?.role === 'owner' 
+      ? '/owner' 
+      : profile?.role === 'vendor' 
+      ? '/vendor' 
+      : '/'
+
+    window.location.replace(destination)
   }
 
   return (
