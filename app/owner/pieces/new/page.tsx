@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 
@@ -39,6 +39,11 @@ export default function NewPiecePage() {
   const [loading, setLoading]       = useState(false)
   const [error, setError]           = useState('')
 
+  // Fotos
+  const [photos, setPhotos]         = useState<File[]>([])
+  const [previews, setPreviews]     = useState<string[]>([])
+  const fileRef                     = useRef<HTMLInputElement>(null)
+
   const t          = TIERS[tier]
   const costGTQ    = currency === 'USD' ? cost * TC : cost
   const importCost = costGTQ * 1.45
@@ -46,69 +51,95 @@ export default function NewPiecePage() {
   const minPrice   = Math.round(importCost * (1 + t.min / 100))
   const marginOk   = margin >= t.min && margin <= t.max
 
+  function handlePhotoChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files || [])
+    if (photos.length + files.length > 3) {
+      alert('Máximo 3 fotos por pieza')
+      return
+    }
+    const newFiles    = [...photos, ...files].slice(0, 3)
+    const newPreviews = newFiles.map(f => URL.createObjectURL(f))
+    setPhotos(newFiles)
+    setPreviews(newPreviews)
+  }
+
+  function removePhoto(idx: number) {
+    const newFiles    = photos.filter((_, i) => i !== idx)
+    const newPreviews = previews.filter((_, i) => i !== idx)
+    setPhotos(newFiles)
+    setPreviews(newPreviews)
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!marginOk) return
     setLoading(true)
     setError('')
 
-    try {
-      const sp   = SPECIES[speciesIdx]
-      const year = new Date().getFullYear()
+    const sp   = SPECIES[speciesIdx]
+    const year = new Date().getFullYear()
 
-      // Obtener el siguiente número disponible
-      const { count, error: countError } = await supabase
+    const { count } = await supabase
+      .from('pieces')
+      .select('*', { count: 'exact', head: true })
+      .like('code', `${sp.prefix}-${year}-%`)
+
+    const num  = String((count || 0) + 1).padStart(3, '0')
+    const code = `${sp.prefix}-${year}-${num}`
+
+    const { data: speciesRow } = await supabase
+      .from('species')
+      .select('id')
+      .eq('code_prefix', sp.prefix)
+      .single()
+
+    // Subir fotos a Supabase Storage
+    const photoUrls: string[] = []
+    for (const file of photos) {
+      const ext      = file.name.split('.').pop()
+      const path     = `${code}/${Date.now()}.${ext}`
+      const { error: uploadError } = await supabase.storage
         .from('pieces')
-        .select('*', { count: 'exact', head: true })
-        .like('code', `${sp.prefix}-${year}-%`)
+        .upload(path, file, { cacheControl: '3600', upsert: false })
 
-      console.log('COUNT:', count, 'ERROR:', countError)
-
-      const num  = String((count || 0) + 1).padStart(3, '0')
-      const code = `${sp.prefix}-${year}-${num}`
-
-      // Obtener species_id
-      const { data: speciesRow, error: speciesError } = await supabase
-        .from('species')
-        .select('id')
-        .eq('code_prefix', sp.prefix)
-        .single()
-
-      console.log('SPECIES ROW:', speciesRow, 'ERROR:', speciesError)
-
-      const { error: insertError } = await supabase
-        .from('pieces')
-        .insert({
-          code,
-          name,
-          species_id:       speciesRow?.id,
-          size,
-          tier,
-          cost_currency:    currency,
-          cost_amount:      cost,
-          exchange_rate:    TC,
-          margin_pct:       margin,
-          sale_price:       salePrice,
-          is_special_order: isSpecial,
-          internal_notes:   notes || null,
-          status:           'active',
-        })
-
-      console.log('INSERT ERROR:', insertError)
-
-      if (insertError) {
-        setError('Error al guardar: ' + insertError.message)
-        setLoading(false)
-        return
+      if (uploadError) {
+        console.log('Upload error:', uploadError)
+        continue
       }
 
-      router.push('/owner/pieces')
+      const { data: urlData } = supabase.storage
+        .from('pieces')
+        .getPublicUrl(path)
 
-    } catch (err) {
-      console.log('CATCH ERROR:', err)
-      setError('Error inesperado')
-      setLoading(false)
+      photoUrls.push(urlData.publicUrl)
     }
+
+    const { error: insertError } = await supabase
+      .from('pieces')
+      .insert({
+        code,
+        name,
+        species_id:       speciesRow?.id,
+        size,
+        tier,
+        cost_currency:    currency,
+        cost_amount:      cost,
+        exchange_rate:    TC,
+        margin_pct:       margin,
+        sale_price:       salePrice,
+        is_special_order: isSpecial,
+        internal_notes:   notes || null,
+        status:           'active',
+        photos:           photoUrls,
+      })
+
+    if (insertError) {
+      setError('Error al guardar: ' + insertError.message)
+      setLoading(false)
+      return
+    }
+
+    router.push('/owner/pieces')
   }
 
   const input = {
@@ -144,20 +175,17 @@ export default function NewPiecePage() {
         </h1>
 
         {error && (
-          <div style={{
-            background: 'rgba(232,116,138,0.08)',
-            border: '0.5px solid rgba(232,116,138,0.25)',
-            borderRadius: '5px', padding: '10px 12px',
-            fontSize: '12px', color: '#E8748A', marginBottom: '16px',
-          }}>
+          <div style={{ background: 'rgba(232,116,138,0.08)', border: '0.5px solid rgba(232,116,138,0.25)', borderRadius: '5px', padding: '10px 12px', fontSize: '12px', color: '#E8748A', marginBottom: '16px' }}>
             {error}
           </div>
         )}
 
         <form onSubmit={handleSubmit}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
 
+            {/* Columna izquierda */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+
               <div style={{ background: '#161616', border: '0.5px solid rgba(201,168,76,0.18)', borderRadius: '8px', padding: '16px' }}>
                 <div style={{ fontSize: '11px', fontWeight: 500, color: '#8A8680', letterSpacing: '0.04em', textTransform: 'uppercase' as const, marginBottom: '14px' }}>
                   Clasificación
@@ -171,9 +199,7 @@ export default function NewPiecePage() {
                 <div style={{ marginBottom: '12px' }}>
                   <label style={label}>Especie *</label>
                   <select style={{ ...input, cursor: 'pointer' }} value={speciesIdx} onChange={e => setSpeciesIdx(+e.target.value)}>
-                    {SPECIES.map((s, i) => (
-                      <option key={i} value={i}>{s.name}</option>
-                    ))}
+                    {SPECIES.map((s, i) => <option key={i} value={i}>{s.name}</option>)}
                   </select>
                 </div>
 
@@ -217,16 +243,50 @@ export default function NewPiecePage() {
                   </label>
                 </div>
               </div>
-
+              <div style={{ color: 'red', fontSize: '20px' }}>AQUI VAN LAS FOTOS</div>
+              {/* Fotos */}
               <div style={{ background: '#161616', border: '0.5px solid rgba(201,168,76,0.18)', borderRadius: '8px', padding: '16px' }}>
-                <div style={{ fontSize: '11px', fontWeight: 500, color: '#8A8680', letterSpacing: '0.04em', textTransform: 'uppercase' as const, marginBottom: '14px' }}>
+                <div style={{ fontSize: '11px', fontWeight: 500, color: '#8A8680', textTransform: 'uppercase' as const, marginBottom: '12px' }}>
+                  Fotos ({photos.length}/3)
+                </div>
+                <div style={{ display: 'flex', gap: '8px', marginBottom: '10px', flexWrap: 'wrap' }}>
+                  {previews.map((src, i) => (
+                    <div key={i} style={{ position: 'relative', width: '80px', height: '80px', borderRadius: '5px', overflow: 'hidden', border: '0.5px solid rgba(201,168,76,0.18)' }}>
+                      <img src={src} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                      <button type="button" onClick={() => removePhoto(i)} style={{
+                        position: 'absolute', top: '2px', right: '2px',
+                        width: '18px', height: '18px', borderRadius: '50%',
+                        background: 'rgba(0,0,0,0.7)', border: 'none',
+                        color: '#fff', fontSize: '11px', cursor: 'pointer',
+                      }}>✕</button>
+                    </div>
+                  ))}
+                  <button type="button" onClick={() => fileRef.current?.click()} style={{
+                    width: '80px', height: '80px', borderRadius: '5px', cursor: 'pointer',
+                    background: '#1E1E1E', border: '0.5px dashed rgba(201,168,76,0.3)',
+                    color: '#8A8680', fontSize: '11px', display: 'flex',
+                    alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: '4px',
+                  }}>
+                    <span style={{ fontSize: '18px' }}>+</span>
+                    Foto
+                  </button>
+                </div>
+                <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp" multiple style={{ display: 'none' }} onChange={handlePhotoChange} />
+                <div style={{ fontSize: '10px', color: '#3A3835' }}>Máximo 3 fotos · JPG, PNG o WebP</div>
+              </div>
+
+              {/* Notas */}
+              <div style={{ background: '#161616', border: '0.5px solid rgba(201,168,76,0.18)', borderRadius: '8px', padding: '16px' }}>
+                <div style={{ fontSize: '11px', fontWeight: 500, color: '#8A8680', letterSpacing: '0.04em', textTransform: 'uppercase' as const, marginBottom: '10px' }}>
                   Notas internas
                 </div>
                 <textarea style={{ ...input, resize: 'none' as const }} rows={3} value={notes} onChange={e => setNotes(e.target.value)} placeholder="Proveedor, lote, observaciones..." />
               </div>
             </div>
 
+            {/* Columna derecha */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+
               <div style={{ background: '#161616', border: '0.5px solid rgba(201,168,76,0.18)', borderRadius: '8px', padding: '16px' }}>
                 <div style={{ fontSize: '11px', fontWeight: 500, color: '#8A8680', letterSpacing: '0.04em', textTransform: 'uppercase' as const, marginBottom: '14px' }}>
                   Precio

@@ -88,11 +88,13 @@ export default async function OwnerDashboard() {
         }}>
           {[
             { label: 'Ingresar pieza', href: '/owner/pieces/new', desc: 'Agregar al inventario' },
+            
             { label: 'Catálogo interno', href: '/owner/pieces', desc: 'Ver y editar piezas' },
             { label: 'Campañas', href: '/owner/campaigns', desc: 'Descuentos por evento' },
             { label: 'Vendedores', href: '/owner/vendors', desc: 'Gestionar equipo' },
             { label: 'Reportes', href: '/owner/reports', desc: 'Métricas y estadísticas' },
             { label: 'Calculadora', href: '/owner/calculator', desc: 'Piezas bajo pedido' },
+            { label: 'Fotos de piezas', href: '/owner/photos', desc: 'Subir y gestionar fotos' },
           ].map((action, i) => (
             <a key={i} href={action.href} style={{
               background: '#161616',

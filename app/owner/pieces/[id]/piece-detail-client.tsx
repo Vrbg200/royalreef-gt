@@ -17,21 +17,65 @@ export default function PieceDetailClient({ piece, history }: { piece: any, hist
 
   const t = TIERS[piece.tier as keyof typeof TIERS]
 
-  const [margin, setMargin]   = useState(piece.margin_pct)
-  const [cost, setCost]       = useState(piece.cost_amount)
-  const [currency]            = useState(piece.cost_currency)
-  const [notes, setNotes]     = useState(piece.internal_notes || '')
-  const [loading, setLoading] = useState(false)
-  const [error, setError]     = useState('')
-  const [success, setSuccess] = useState('')
+  const [margin, setMargin]     = useState(piece.margin_pct)
+  const [cost, setCost]         = useState(piece.cost_amount)
+  const [currency]              = useState(piece.cost_currency)
+  const [notes, setNotes]       = useState(piece.internal_notes || '')
+  const [loading, setLoading]   = useState(false)
+  const [error, setError]       = useState('')
+  const [success, setSuccess]   = useState('')
   const [bajaType, setBajaType] = useState('')
   const [showConfirm, setShowConfirm] = useState(false)
+
+  // Fotos
+  const [photos, setPhotos]         = useState<string[]>(piece.photos || [])
+  const [uploading, setUploading]   = useState(false)
+  const [uploadError, setUploadError] = useState('')
 
   const costGTQ    = currency === 'USD' ? cost * TC : cost
   const importCost = costGTQ * 1.45
   const salePrice  = Math.round(importCost * (1 + margin / 100))
   const minPrice   = Math.round(importCost * (1 + t.min / 100))
   const marginOk   = margin >= t.min && margin <= t.max
+
+  async function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files || [])
+    if (!files.length) return
+    if (photos.length + files.length > 3) {
+      setUploadError('Máximo 3 fotos por pieza')
+      return
+    }
+    setUploading(true)
+    setUploadError('')
+
+    const newUrls: string[] = []
+    for (const file of files) {
+      const ext  = file.name.split('.').pop()
+      const path = `${piece.code}/${Date.now()}.${ext}`
+      const { error: uploadErr } = await supabase.storage
+        .from('pieces')
+        .upload(path, file, { cacheControl: '3600', upsert: false })
+
+      if (uploadErr) {
+        setUploadError('Error al subir: ' + uploadErr.message)
+        continue
+      }
+
+      const { data } = supabase.storage.from('pieces').getPublicUrl(path)
+      newUrls.push(data.publicUrl)
+    }
+
+    const updatedPhotos = [...photos, ...newUrls].slice(0, 3)
+    await supabase.from('pieces').update({ photos: updatedPhotos }).eq('id', piece.id)
+    setPhotos(updatedPhotos)
+    setUploading(false)
+  }
+
+  async function handleDeletePhoto(url: string) {
+    const updatedPhotos = photos.filter(p => p !== url)
+    await supabase.from('pieces').update({ photos: updatedPhotos }).eq('id', piece.id)
+    setPhotos(updatedPhotos)
+  }
 
   async function handleSave() {
     setLoading(true)
@@ -41,10 +85,10 @@ export default function PieceDetailClient({ piece, history }: { piece: any, hist
     const { error: err } = await supabase
       .from('pieces')
       .update({
-        cost_amount:     cost,
-        margin_pct:      margin,
-        sale_price:      salePrice,
-        internal_notes:  notes || null,
+        cost_amount:    cost,
+        margin_pct:     margin,
+        sale_price:     salePrice,
+        internal_notes: notes || null,
       })
       .eq('id', piece.id)
 
@@ -59,20 +103,8 @@ export default function PieceDetailClient({ piece, history }: { piece: any, hist
   async function handleBaja() {
     if (!bajaType) return
     setLoading(true)
-
     const newStatus = bajaType === 'retiro' ? 'inactive' : 'deleted'
-
-    const { error: err } = await supabase
-      .from('pieces')
-      .update({ status: newStatus })
-      .eq('id', piece.id)
-
-    if (err) {
-      setError('Error al dar de baja: ' + err.message)
-      setLoading(false)
-      return
-    }
-
+    await supabase.from('pieces').update({ status: newStatus }).eq('id', piece.id)
     router.push('/owner/pieces')
   }
 
@@ -108,10 +140,10 @@ export default function PieceDetailClient({ piece, history }: { piece: any, hist
           <span>{piece.code}</span>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.4fr', gap: '16px' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
 
-          {/* Columna izquierda — info y historial */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+          {/* Fila superior — info + fotos */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
 
             {/* Info de la pieza */}
             <div style={{ background: '#161616', border: '0.5px solid rgba(201,168,76,0.18)', borderRadius: '8px', padding: '16px' }}>
@@ -129,14 +161,13 @@ export default function PieceDetailClient({ piece, history }: { piece: any, hist
                   {piece.status === 'active' ? 'Activo' : piece.status}
                 </span>
               </div>
-
               {[
-                { label: 'Tamaño', value: piece.size },
-                { label: 'Tier', value: TIERS[piece.tier as keyof typeof TIERS]?.label },
-                { label: 'Costo de compra', value: `${piece.cost_currency} ${piece.cost_amount}` },
-                { label: 'Costo real (+45%)', value: `Q ${piece.import_cost?.toFixed(2)}` },
-                { label: 'Bajo pedido', value: piece.is_special_order ? 'Sí' : 'No' },
-                { label: 'Ingresado', value: new Date(piece.created_at).toLocaleDateString('es-GT') },
+                { label: 'Tamaño',          value: piece.size },
+                { label: 'Tier',            value: TIERS[piece.tier as keyof typeof TIERS]?.label },
+                { label: 'Costo compra',    value: `${piece.cost_currency} ${piece.cost_amount}` },
+                { label: 'Costo real +45%', value: `Q ${piece.import_cost?.toFixed(2)}` },
+                { label: 'Bajo pedido',     value: piece.is_special_order ? 'Sí' : 'No' },
+                { label: 'Ingresado',       value: new Date(piece.created_at).toLocaleDateString('es-GT') },
               ].map((r, i) => (
                 <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', borderBottom: '0.5px solid rgba(201,168,76,0.08)', fontSize: '12px' }}>
                   <span style={{ color: '#8A8680' }}>{r.label}</span>
@@ -145,7 +176,179 @@ export default function PieceDetailClient({ piece, history }: { piece: any, hist
               ))}
             </div>
 
-            {/* Historial de precio */}
+            {/* Fotos */}
+            <div style={{ background: '#161616', border: '0.5px solid rgba(201,168,76,0.18)', borderRadius: '8px', padding: '16px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                <div style={{ fontSize: '11px', fontWeight: 500, color: '#8A8680', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  Fotos ({photos.length}/3)
+                </div>
+                {photos.length < 3 && (
+                  <label style={{
+                    fontSize: '11px', padding: '4px 12px', borderRadius: '4px', cursor: 'pointer',
+                    background: 'rgba(201,168,76,0.1)', color: '#C9A84C',
+                    border: '0.5px solid rgba(201,168,76,0.3)',
+                  }}>
+                    {uploading ? 'Subiendo...' : '+ Agregar foto'}
+                    <input
+                      type="file" accept="image/jpeg,image/png,image/webp"
+                      multiple style={{ display: 'none' }}
+                      onChange={handleUpload}
+                      disabled={uploading}
+                    />
+                  </label>
+                )}
+              </div>
+
+              {uploadError && (
+                <div style={{ fontSize: '11px', color: '#E8748A', marginBottom: '8px' }}>{uploadError}</div>
+              )}
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: '8px' }}>
+                {photos.map((url, i) => (
+                  <div key={i} style={{ position: 'relative', aspectRatio: '1', borderRadius: '6px', overflow: 'hidden', border: '0.5px solid rgba(201,168,76,0.18)' }}>
+                    <img src={url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                    <button onClick={() => handleDeletePhoto(url)} style={{
+                      position: 'absolute', top: '4px', right: '4px',
+                      width: '20px', height: '20px', borderRadius: '50%',
+                      background: 'rgba(0,0,0,0.7)', border: 'none',
+                      color: '#fff', fontSize: '11px', cursor: 'pointer',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    }}>✕</button>
+                  </div>
+                ))}
+                {photos.length === 0 && (
+                  <div style={{
+                    aspectRatio: '1', borderRadius: '6px',
+                    background: '#1E1E1E', border: '0.5px dashed rgba(201,168,76,0.2)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: '11px', color: '#3A3835', gridColumn: 'span 3',
+                    padding: '24px',
+                  }}>
+                    Sin fotos — usa el botón para agregar
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Fila inferior — editor + historial + baja */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+
+            {/* Editor de precio */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              <div style={{ background: '#161616', border: '0.5px solid rgba(201,168,76,0.18)', borderRadius: '8px', padding: '16px' }}>
+                <div style={{ fontSize: '11px', fontWeight: 500, color: '#8A8680', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '14px' }}>
+                  Editar precio y margen
+                </div>
+
+                <div style={{ marginBottom: '12px' }}>
+                  <label style={{ display: 'block', fontSize: '11px', color: '#8A8680', marginBottom: '5px' }}>Costo ({currency})</label>
+                  <input style={input} type="number" min="0" step="0.5" value={cost} onChange={e => setCost(+e.target.value)} />
+                </div>
+
+                <div style={{ marginBottom: '12px' }}>
+                  <label style={{ display: 'block', fontSize: '11px', color: '#8A8680', marginBottom: '5px' }}>
+                    Margen % (mín {t.min}% — máx {t.max}%)
+                  </label>
+                  <input type="range" min={t.min} max={t.max} step="1" value={margin}
+                    onChange={e => setMargin(+e.target.value)}
+                    style={{ width: '100%', accentColor: '#C9A84C' }} />
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: '#8A8680', marginTop: '3px' }}>
+                    <span>Mín {t.min}%</span>
+                    <span style={{ color: marginOk ? '#C9A84C' : '#E8748A', fontWeight: 500 }}>{margin}%</span>
+                    <span>Máx {t.max}%</span>
+                  </div>
+                </div>
+
+                <div style={{ background: 'rgba(201,168,76,0.05)', border: '0.5px solid rgba(201,168,76,0.18)', borderRadius: '5px', padding: '10px 12px', marginBottom: '12px' }}>
+                  {[
+                    { label: 'Costo real (+45%)', value: `Q ${importCost.toFixed(2)}` },
+                    { label: 'Precio de venta',   value: `Q ${salePrice.toLocaleString()}`, gold: true },
+                    { label: 'Precio mínimo',      value: `Q ${minPrice.toLocaleString()}` },
+                  ].map((r, i) => (
+                    <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', padding: '2px 0' }}>
+                      <span style={{ color: '#8A8680' }}>{r.label}</span>
+                      <span style={{ color: r.gold ? '#C9A84C' : '#F0EDE6', fontWeight: r.gold ? 500 : 400 }}>{r.value}</span>
+                    </div>
+                  ))}
+                </div>
+
+                <div style={{ marginBottom: '12px' }}>
+                  <label style={{ display: 'block', fontSize: '11px', color: '#8A8680', marginBottom: '5px' }}>Notas internas</label>
+                  <textarea style={{ ...input, resize: 'none' as const }} rows={2} value={notes} onChange={e => setNotes(e.target.value)} />
+                </div>
+
+                {error   && <div style={{ fontSize: '12px', color: '#E8748A', marginBottom: '8px' }}>{error}</div>}
+                {success && <div style={{ fontSize: '12px', color: '#4AAF7A', marginBottom: '8px' }}>{success}</div>}
+
+                <button onClick={handleSave} disabled={loading || !marginOk} style={{
+                  width: '100%', padding: '10px',
+                  background: !marginOk ? '#252525' : '#C9A84C',
+                  color: !marginOk ? '#8A8680' : '#0D0D0D',
+                  border: 'none', borderRadius: '5px',
+                  fontSize: '13px', fontWeight: 500, cursor: 'pointer',
+                }}>
+                  {loading ? 'Guardando...' : 'Guardar cambios'}
+                </button>
+              </div>
+
+              {/* Dar de baja */}
+              {piece.status === 'active' && (
+                <div style={{ background: 'rgba(232,116,138,0.05)', border: '0.5px solid rgba(232,116,138,0.25)', borderRadius: '8px', padding: '16px' }}>
+                  <div style={{ fontSize: '11px', fontWeight: 500, color: '#E8748A', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '12px' }}>
+                    Dar de baja
+                  </div>
+                  {[
+                    { key: 'murio',  label: 'La pieza murió',       sub: 'Afecta métricas de pérdida' },
+                    { key: 'error',  label: 'Error de ingreso',     sub: 'Se elimina sin afectar métricas' },
+                    { key: 'retiro', label: 'Retirar del catálogo', sub: 'Se oculta pero se conserva el registro' },
+                  ].map(opt => (
+                    <div key={opt.key} onClick={() => { setBajaType(opt.key); setShowConfirm(false) }} style={{
+                      display: 'flex', alignItems: 'flex-start', gap: '10px',
+                      padding: '8px 0', borderBottom: '0.5px solid rgba(232,116,138,0.15)', cursor: 'pointer',
+                    }}>
+                      <div style={{
+                        width: '14px', height: '14px', borderRadius: '50%', flexShrink: 0, marginTop: '2px',
+                        border: `0.5px solid ${bajaType === opt.key ? '#E8748A' : 'rgba(232,116,138,0.3)'}`,
+                        background: bajaType === opt.key ? '#E8748A' : 'transparent',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      }}>
+                        {bajaType === opt.key && <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#0D0D0D' }} />}
+                      </div>
+                      <div>
+                        <div style={{ fontSize: '12px', color: '#F0EDE6' }}>{opt.label}</div>
+                        <div style={{ fontSize: '10px', color: '#8A8680', marginTop: '1px' }}>{opt.sub}</div>
+                      </div>
+                    </div>
+                  ))}
+                  <button onClick={() => setShowConfirm(true)} disabled={!bajaType} style={{
+                    width: '100%', padding: '9px', marginTop: '12px',
+                    background: bajaType ? 'rgba(232,116,138,0.1)' : '#1E1E1E',
+                    color: bajaType ? '#E8748A' : '#3A3835',
+                    border: `0.5px solid ${bajaType ? 'rgba(232,116,138,0.3)' : 'transparent'}`,
+                    borderRadius: '5px', fontSize: '12px', fontWeight: 500, cursor: bajaType ? 'pointer' : 'not-allowed',
+                  }}>
+                    Dar de baja
+                  </button>
+                  {showConfirm && (
+                    <div style={{ background: '#1E1E1E', border: '0.5px solid rgba(232,116,138,0.3)', borderRadius: '6px', padding: '12px', marginTop: '10px' }}>
+                      <div style={{ fontSize: '12px', fontWeight: 500, color: '#E8748A', marginBottom: '6px' }}>¿Confirmar baja?</div>
+                      <div style={{ fontSize: '11px', color: '#8A8680', marginBottom: '12px' }}>Esta acción no se puede deshacer.</div>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                        <button onClick={handleBaja} style={{ padding: '8px', background: '#E8748A', color: '#0D0D0D', border: 'none', borderRadius: '4px', fontSize: '12px', fontWeight: 500, cursor: 'pointer' }}>
+                          Confirmar
+                        </button>
+                        <button onClick={() => setShowConfirm(false)} style={{ padding: '8px', background: 'transparent', color: '#8A8680', border: '0.5px solid rgba(201,168,76,0.18)', borderRadius: '4px', fontSize: '12px', cursor: 'pointer' }}>
+                          Cancelar
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Historial */}
             <div style={{ background: '#161616', border: '0.5px solid rgba(201,168,76,0.18)', borderRadius: '8px', padding: '16px' }}>
               <div style={{ fontSize: '11px', fontWeight: 500, color: '#8A8680', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '12px' }}>
                 Historial de precio
@@ -165,137 +368,6 @@ export default function PieceDetailClient({ piece, history }: { piece: any, hist
                 </div>
               ))}
             </div>
-          </div>
-
-          {/* Columna derecha — editar y dar de baja */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-
-            {/* Editor de precio */}
-            <div style={{ background: '#161616', border: '0.5px solid rgba(201,168,76,0.18)', borderRadius: '8px', padding: '16px' }}>
-              <div style={{ fontSize: '11px', fontWeight: 500, color: '#8A8680', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '14px' }}>
-                Editar precio y margen
-              </div>
-
-              <div style={{ marginBottom: '12px' }}>
-                <label style={{ display: 'block', fontSize: '11px', color: '#8A8680', marginBottom: '5px' }}>
-                  Costo de compra ({currency})
-                </label>
-                <input style={input} type="number" min="0" step="0.5" value={cost} onChange={e => setCost(+e.target.value)} />
-              </div>
-
-              <div style={{ marginBottom: '12px' }}>
-                <label style={{ display: 'block', fontSize: '11px', color: '#8A8680', marginBottom: '5px' }}>
-                  Margen % (mín {t.min}% — máx {t.max}%)
-                </label>
-                <input type="range" min={t.min} max={t.max} step="1" value={margin}
-                  onChange={e => setMargin(+e.target.value)}
-                  style={{ width: '100%', accentColor: '#C9A84C' }} />
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: '#8A8680', marginTop: '3px' }}>
-                  <span>Mín {t.min}%</span>
-                  <span style={{ color: marginOk ? '#C9A84C' : '#E8748A', fontWeight: 500 }}>{margin}%</span>
-                  <span>Máx {t.max}%</span>
-                </div>
-              </div>
-
-              {/* Preview */}
-              <div style={{ background: 'rgba(201,168,76,0.05)', border: '0.5px solid rgba(201,168,76,0.18)', borderRadius: '5px', padding: '10px 12px', marginBottom: '12px' }}>
-                {[
-                  { label: 'Costo real (+45%)', value: `Q ${importCost.toFixed(2)}` },
-                  { label: 'Precio de venta', value: `Q ${salePrice.toLocaleString()}`, gold: true },
-                  { label: 'Precio mínimo', value: `Q ${minPrice.toLocaleString()}` },
-                ].map((r, i) => (
-                  <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', padding: '2px 0' }}>
-                    <span style={{ color: '#8A8680' }}>{r.label}</span>
-                    <span style={{ color: r.gold ? '#C9A84C' : '#F0EDE6', fontWeight: r.gold ? 500 : 400 }}>{r.value}</span>
-                  </div>
-                ))}
-              </div>
-
-              <div style={{ marginBottom: '12px' }}>
-                <label style={{ display: 'block', fontSize: '11px', color: '#8A8680', marginBottom: '5px' }}>Notas internas</label>
-                <textarea style={{ ...input, resize: 'none' as const }} rows={2} value={notes} onChange={e => setNotes(e.target.value)} />
-              </div>
-
-              {error && <div style={{ fontSize: '12px', color: '#E8748A', marginBottom: '8px' }}>{error}</div>}
-              {success && <div style={{ fontSize: '12px', color: '#4AAF7A', marginBottom: '8px' }}>{success}</div>}
-
-              <button onClick={handleSave} disabled={loading || !marginOk} style={{
-                width: '100%', padding: '10px',
-                background: !marginOk ? '#252525' : '#C9A84C',
-                color: !marginOk ? '#8A8680' : '#0D0D0D',
-                border: 'none', borderRadius: '5px',
-                fontSize: '13px', fontWeight: 500, cursor: 'pointer',
-              }}>
-                {loading ? 'Guardando...' : 'Guardar cambios'}
-              </button>
-            </div>
-
-            {/* Dar de baja */}
-            {piece.status === 'active' && (
-              <div style={{ background: 'rgba(232,116,138,0.05)', border: '0.5px solid rgba(232,116,138,0.25)', borderRadius: '8px', padding: '16px' }}>
-                <div style={{ fontSize: '11px', fontWeight: 500, color: '#E8748A', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '12px' }}>
-                  Dar de baja
-                </div>
-
-                {[
-                  { key: 'murio', label: 'La pieza murió', sub: 'Se elimina del inventario — afecta métricas de pérdida' },
-                  { key: 'error', label: 'Error de ingreso', sub: 'Se elimina sin afectar métricas' },
-                  { key: 'retiro', label: 'Retirar del catálogo', sub: 'Se oculta pero el registro se conserva' },
-                ].map(opt => (
-                  <div key={opt.key} onClick={() => { setBajaType(opt.key); setShowConfirm(false) }} style={{
-                    display: 'flex', alignItems: 'flex-start', gap: '10px',
-                    padding: '8px 0', borderBottom: '0.5px solid rgba(232,116,138,0.15)',
-                    cursor: 'pointer',
-                  }}>
-                    <div style={{
-                      width: '14px', height: '14px', borderRadius: '50%', flexShrink: 0, marginTop: '2px',
-                      border: `0.5px solid ${bajaType === opt.key ? '#E8748A' : 'rgba(232,116,138,0.3)'}`,
-                      background: bajaType === opt.key ? '#E8748A' : 'transparent',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    }}>
-                      {bajaType === opt.key && <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#0D0D0D' }} />}
-                    </div>
-                    <div>
-                      <div style={{ fontSize: '12px', color: '#F0EDE6' }}>{opt.label}</div>
-                      <div style={{ fontSize: '10px', color: '#8A8680', marginTop: '1px' }}>{opt.sub}</div>
-                    </div>
-                  </div>
-                ))}
-
-                <button onClick={() => setShowConfirm(true)} disabled={!bajaType} style={{
-                  width: '100%', padding: '9px', marginTop: '12px',
-                  background: bajaType ? 'rgba(232,116,138,0.1)' : '#1E1E1E',
-                  color: bajaType ? '#E8748A' : '#3A3835',
-                  border: `0.5px solid ${bajaType ? 'rgba(232,116,138,0.3)' : 'transparent'}`,
-                  borderRadius: '5px', fontSize: '12px', fontWeight: 500, cursor: bajaType ? 'pointer' : 'not-allowed',
-                }}>
-                  Dar de baja
-                </button>
-
-                {showConfirm && (
-                  <div style={{ background: '#1E1E1E', border: '0.5px solid rgba(232,116,138,0.3)', borderRadius: '6px', padding: '12px', marginTop: '10px' }}>
-                    <div style={{ fontSize: '12px', fontWeight: 500, color: '#E8748A', marginBottom: '6px' }}>¿Confirmar baja?</div>
-                    <div style={{ fontSize: '11px', color: '#8A8680', marginBottom: '12px' }}>
-                      Esta acción no se puede deshacer.
-                    </div>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-                      <button onClick={handleBaja} style={{
-                        padding: '8px', background: '#E8748A', color: '#0D0D0D',
-                        border: 'none', borderRadius: '4px', fontSize: '12px', fontWeight: 500, cursor: 'pointer',
-                      }}>
-                        Confirmar
-                      </button>
-                      <button onClick={() => setShowConfirm(false)} style={{
-                        padding: '8px', background: 'transparent', color: '#8A8680',
-                        border: '0.5px solid rgba(201,168,76,0.18)', borderRadius: '4px', fontSize: '12px', cursor: 'pointer',
-                      }}>
-                        Cancelar
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
           </div>
         </div>
       </div>
