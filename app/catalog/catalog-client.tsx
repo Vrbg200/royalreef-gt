@@ -52,8 +52,6 @@ export default function CatalogClient({
 
         {/* Filtros */}
         <div style={{ marginBottom: '20px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-
-          {/* Búsqueda */}
           <input
             placeholder="Buscar por nombre o código..."
             value={search}
@@ -67,7 +65,6 @@ export default function CatalogClient({
             }}
           />
 
-          {/* Especies */}
           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
             <button onClick={() => setSelectedSpecies('all')} style={{
               padding: '6px 14px', borderRadius: '20px', fontSize: '12px', cursor: 'pointer',
@@ -89,7 +86,6 @@ export default function CatalogClient({
             ))}
           </div>
 
-          {/* Talla y descuento */}
           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
             {['all','XS','M','XL'].map(s => (
               <button key={s} onClick={() => setSelectedSize(s)} style={{
@@ -128,6 +124,7 @@ export default function CatalogClient({
               const hasDisc  = p.discount_pct > 0
               const discLbl  = discountLabel(p)
               const isSpec   = p.is_special_order
+              const hasPhoto = p.photos && p.photos.length > 0
 
               return (
                 <div key={p.id} style={{
@@ -135,15 +132,18 @@ export default function CatalogClient({
                   border: '0.5px solid rgba(201,168,76,0.18)',
                   borderRadius: '8px', overflow: 'hidden',
                 }}>
-                  {/* Imagen placeholder */}
                   <a href={`/catalog/${p.id}`} style={{ textDecoration: 'none', display: 'block' }}>
                     <div style={{
                       width: '100%', aspectRatio: '1',
                       background: 'linear-gradient(135deg, #1A1A1A 0%, #252525 100%)',
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      position: 'relative',
+                      position: 'relative', overflow: 'hidden',
                     }}>
-                      <span style={{ fontSize: '32px', opacity: 0.3 }}>🪸</span>
+                      {hasPhoto ? (
+                        <img src={p.photos[0]} alt={p.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                      ) : (
+                        <span style={{ fontSize: '32px', opacity: 0.3 }}>🪸</span>
+                      )}
                       {hasDisc && (
                         <div style={{
                           position: 'absolute', top: '8px', left: '8px',
@@ -207,6 +207,8 @@ export default function CatalogClient({
                             price:        effPrice,
                             originalPrice: p.sale_price,
                             discountPct:  p.discount_pct,
+                            delivery:     'city',
+                            deliveryCost: 125,
                           })}
                           style={{
                             padding: '5px 10px', borderRadius: '4px', fontSize: '11px', cursor: 'pointer',
