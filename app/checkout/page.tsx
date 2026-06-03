@@ -80,6 +80,21 @@ export default function CheckoutPage() {
       .update({ status: 'reserved' })
       .in('id', items.map(i => i.id))
 
+   
+    // Enviar email de confirmación
+    try {
+      await fetch('/api/email/order-confirmation', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          orderId: order.id,
+          userId:  user?.id,
+        }),
+      })
+    } catch (e) {
+      console.log('Email error:', e)
+    }
+
     clearCart()
     router.push(`/order/${order.id}`)
   }

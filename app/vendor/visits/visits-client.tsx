@@ -38,22 +38,33 @@ export default function VisitsClient({
     no_show:     { label: 'No se presentó', color: '#E8748A' },
   }
 
-  async function handleApprove(visit: any) {
-    setLoading(true)
-    await supabase
-      .from('store_visits')
-      .update({
-        status:         'approved',
-        confirmed_date: visit.requested_date,
-        confirmed_time: visit.requested_time,
-        approved_by:    userId,
-        approved_at:    new Date().toISOString(),
-      })
-      .eq('id', visit.id)
-    setLoading(false)
-    setSelected(null)
-    router.refresh()
+ async function handleApprove(visit: any) {
+  setLoading(true)
+  await supabase
+    .from('store_visits')
+    .update({
+      status:         'approved',
+      confirmed_date: visit.requested_date,
+      confirmed_time: visit.requested_time,
+      approved_by:    userId,
+      approved_at:    new Date().toISOString(),
+    })
+    .eq('id', visit.id)
+
+  try {
+    await fetch('/api/email/visit-confirmation', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ visitId: visit.id }),
+    })
+  } catch(e) {
+    console.log('Email error:', e)
   }
+
+  setLoading(false)
+  setSelected(null)
+  router.refresh()
+}
 
   async function handleReject(id: string) {
     setLoading(true)
